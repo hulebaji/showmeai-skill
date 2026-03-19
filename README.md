@@ -84,6 +84,28 @@ Once configured, just tell your AI assistant what you want.
 
 ---
 
+## Image-to-3D Conversion
+
+Convert 2D images to 3D models (PNG with transparent background recommended).
+
+### Basic Conversion
+
+| Prompt |
+|---|
+| Convert this character image to 3D model |
+| Create a 3D model from this sprite with texture |
+| Generate high-quality 3D model with more detail |
+
+### 3D Parameters
+
+| Prompt |
+|---|
+| Convert to GLB format with texture |
+| Generate with higher quality (more steps) |
+| Create STL file for 3D printing |
+
+---
+
 ## Supported Models
 
 ### Image Models
@@ -103,6 +125,14 @@ Once configured, just tell your AI assistant what you want.
 | Model | Features |
 |---|---|
 | `doubao-seedance-1-5-pro-251215` | **Default**. Text-to-video, image-to-video, first-and-last-frame. Supports audio generation, draft mode. 24 FPS, 5s/10s duration, 480P/720P resolution. |
+
+### 3D Models
+
+| Model | Features |
+|---|---|
+| `Hunyuan3D-2` | **Default**. Fast conversion (seconds). Supports glb/stl output. |
+| `Hi3DGen` | Image-to-3D conversion. Supports glb/stl output. |
+| `Step1X-3D` | Image-to-3D conversion. Supports glb/stl output. |
 
 ---
 

@@ -52,6 +52,13 @@ def request_video(
     last_frame_path: str = "",
     generate_audio: bool = True,
     draft: bool = False,
+    resolution: str = "",
+    ratio: str = "",
+    duration: int = 0,
+    watermark: bool = False,
+    camera_fixed: bool = False,
+    seed: int = 0,
+    frames: int = 0,
 ) -> dict:
     """POST /task/volces/seedance"""
     # Remove /v1 suffix if present for video API
@@ -125,6 +132,22 @@ def request_video(
     # Only add draft parameter for Seedance 1.5 pro
     if "1-5-pro" in model:
         payload["draft"] = draft
+
+    # Add new direct parameters (recommended way)
+    if resolution:
+        payload["resolution"] = resolution
+    if ratio:
+        payload["ratio"] = ratio
+    if duration > 0:
+        payload["duration"] = duration
+    if frames > 0:
+        payload["frames"] = frames
+    if watermark:
+        payload["watermark"] = watermark
+    if camera_fixed:
+        payload["camera_fixed"] = camera_fixed
+    if seed > 0:
+        payload["seed"] = seed
 
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
@@ -204,6 +227,20 @@ def main():
     ap.add_argument("--no-audio", action="store_true", help="Generate video without audio.")
     ap.add_argument("--draft", action="store_true",
                     help="Enable draft/preview mode (faster, lower quality, only for 1.5 pro).")
+    ap.add_argument("--resolution", default="", choices=["480p", "720p", "1080p"],
+                    help="Video resolution (default: 720p for 1.5 pro/lite, 1080p for 1.0 pro).")
+    ap.add_argument("--ratio", default="",
+                    choices=["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
+                    help="Aspect ratio (default: 16:9 for text-to-video, adaptive for image-to-video).")
+    ap.add_argument("--duration", type=int, default=0,
+                    help="Video duration in seconds (2-12, default: 5). Use 0 for auto (4-12, 1.5 pro only).")
+    ap.add_argument("--frames", type=int, default=0,
+                    help="Number of frames (alternative to duration).")
+    ap.add_argument("--watermark", action="store_true", help="Add watermark to video.")
+    ap.add_argument("--camera-fixed", action="store_true",
+                    help="Keep camera fixed (no camera movement).")
+    ap.add_argument("--seed", type=int, default=0,
+                    help="Random seed for reproducible results.")
     ap.add_argument("--save", action="store_true", help="Save to ~/.openclaw/media/.")
     ap.add_argument("--out-dir", default="", help="Save to custom directory.")
     ap.add_argument("--filename", default="", help="Custom output filename.")
@@ -242,6 +279,19 @@ def main():
         print("Error: Cannot use --image with --first-frame/--last-frame.", file=sys.stderr)
         sys.exit(1)
 
+    # Validate duration and frames
+    if args.duration < 0 or args.duration > 12:
+        print("Error: --duration must be between 0 and 12 seconds (0 for auto, 1.5 pro only).", file=sys.stderr)
+        sys.exit(1)
+    if args.duration > 0 and args.duration < 2:
+        print("Error: --duration must be at least 2 seconds when specified.", file=sys.stderr)
+        sys.exit(1)
+    if args.frames < 0:
+        print("Error: --frames must be a positive integer.", file=sys.stderr)
+        sys.exit(1)
+    if args.duration > 0 and args.frames > 0:
+        print("Warning: Both --duration and --frames specified; --frames takes precedence.", file=sys.stderr)
+
     out_dir = get_default_save_dir()
     if args.save:
         if args.out_dir:
@@ -262,6 +312,13 @@ def main():
             last_frame_path=args.last_frame,
             generate_audio=not args.no_audio,
             draft=args.draft,
+            resolution=args.resolution,
+            ratio=args.ratio,
+            duration=args.duration,
+            watermark=args.watermark,
+            camera_fixed=args.camera_fixed,
+            seed=args.seed,
+            frames=args.frames,
         )
 
         process_response(response, out_dir, args.prompt, args.filename)

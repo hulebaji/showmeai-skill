@@ -1,6 +1,6 @@
 ---
 name: Showmeai
-description: Generate images and videos via Showmeai API. Image gen uses OpenAI-compatible Images API (nano-banana and gpt-image models). Video gen uses Seedance API (doubao-seedance-1-5-pro). Images are NOT saved locally by default (URL only). Use --save flag when the user wants to keep the image. Videos are saved when available.
+description: Generate images, videos, and 3D models via Showmeai API. Image gen uses OpenAI-compatible Images API (nano-banana and gpt-image models). Video gen uses Seedance API (doubao-seedance-1-5-pro). 3D conversion uses image-to-3D API (Hunyuan3D-2, Hi3DGen, Step1X-3D). Images are NOT saved locally by default (URL only). Use --save flag when the user wants to keep the image. Videos and 3D models are saved when available.
 homepage: https://api.showmeai.art
 license: MIT
 metadata:
@@ -13,9 +13,9 @@ metadata:
   }
 ---
 
-# Showmeai Image & Video Generation
+# Showmeai Image, Video & 3D Generation
 
-Generate images via Showmeai's OpenAI-compatible Images API (`/images/generations`) or videos via Seedance API (`/task/volces/seedance`).
+Generate images via Showmeai's OpenAI-compatible Images API (`/images/generations`), videos via Seedance API (`/task/volces/seedance`), or convert 2D images to 3D models (`/task/gi/image-to-3d`).
 
 ## Basic Usage
 
@@ -71,6 +71,34 @@ python3 {baseDir}/scripts/video_gen.py --prompt "..." --draft
 
 # Save to local directory
 python3 {baseDir}/scripts/video_gen.py --prompt "..." --save --out-dir /path/to/dir
+
+# With custom resolution, ratio, and duration
+python3 {baseDir}/scripts/video_gen.py --prompt "..." --resolution 1080p --ratio 16:9 --duration 10
+
+# With watermark and fixed camera
+python3 {baseDir}/scripts/video_gen.py --prompt "..." --watermark --camera-fixed
+
+# With seed for reproducible results
+python3 {baseDir}/scripts/video_gen.py --prompt "..." --seed 12345
+```
+
+## Image-to-3D Conversion
+
+```bash
+# Basic conversion
+python3 {baseDir}/scripts/image_to_3d.py --image /path/to/image.png
+
+# With custom model and format
+python3 {baseDir}/scripts/image_to_3d.py --image character.png --model Hunyuan3D-2 --format glb
+
+# With texture and higher quality
+python3 {baseDir}/scripts/image_to_3d.py --image character.png --texture --steps 10 --resolution 256
+
+# Query task status
+python3 {baseDir}/scripts/image_to_3d.py --query <task_id>
+
+# Download when complete
+python3 {baseDir}/scripts/image_to_3d.py --query <task_id> --save
 ```
 
 ## Supported Models
@@ -87,6 +115,11 @@ gpt-image series (returns base64, always saved):
 
 Video models (Seedance API):
 - doubao-seedance-1-5-pro-251215 ← default (supports audio, draft mode, text-to-video, image-to-video, first-and-last-frame)
+
+3D models (Image-to-3D API):
+- Hunyuan3D-2 ← default (supports glb/stl output via type parameter)
+- Hi3DGen (supports glb/stl output via file_format parameter)
+- Step1X-3D (supports glb/stl output via file_format parameter)
 
 ## Config
 
@@ -107,12 +140,27 @@ Set in `.env` or `~/.openclaw/openclaw.json`:
 - For async task submission, the task ID is output
 - Use `--save` to ensure local saving when video is available
 
+**3D Models:**
+- Conversion is async, returns a task ID
+- Use `--query <task_id>` to check status
+- Use `--query <task_id> --save` to download when complete
+- Default save location: `~/.openclaw/media/`
+
 ## Video Prompt Parameters
 
-Can append parameters to prompt text:
-- `--ratio 16:9` / `--ratio adaptive` — aspect ratio
-- `--rs 720p` / `--rs 480p` — resolution (720p, 480p available; 1080p coming soon)
-- `--dur 5` / `--dur 10` — duration in seconds (5s or 10s)
+**New way (recommended):** Use direct command-line parameters
+- `--resolution 480p/720p/1080p` — video resolution
+- `--ratio 16:9/4:3/1:1/3:4/9:16/21:9/adaptive` — aspect ratio
+- `--duration 2-12` — duration in seconds (use 0 for auto on 1.5 pro)
+- `--frames <n>` — number of frames (alternative to duration)
+- `--watermark` — add watermark
+- `--camera-fixed` — keep camera fixed
+- `--seed <n>` — random seed for reproducibility
+
+**Old way (still supported):** Append to prompt text
+- `--ratio 16:9` / `--ratio adaptive`
+- `--rs 720p` / `--rs 480p` / `--rs 1080p`
+- `--dur 5` / `--dur 10`
 - `--cf false` — disable fixed camera
 
-Video specs: 24 FPS, durations 5s/10s, resolutions 480P/720P/1080P (coming soon).
+Video specs: 24 FPS, durations 2-12s, resolutions 480P/720P/1080P.
