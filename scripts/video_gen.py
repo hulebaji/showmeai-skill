@@ -54,7 +54,11 @@ def request_video(
     draft: bool = False,
 ) -> dict:
     """POST /task/volces/seedance"""
-    url = f"{base_url.rstrip('/')}/task/volces/seedance"
+    # Remove /v1 suffix if present for video API
+    base = base_url.rstrip('/')
+    if base.endswith('/v1'):
+        base = base[:-3]
+    url = f"{base}/task/volces/seedance"
 
     # Build content array
     content = [{"type": "text", "text": prompt}]
@@ -135,6 +139,25 @@ def request_video(
         raise RuntimeError(f"Showmeai API error ({e.code}): {e.read().decode('utf-8', errors='replace')}") from e
 
 
+def query_task(base_url: str, api_key: str, task_id: str) -> dict:
+    """GET /task/{task_id} - Query task status"""
+    # Remove /v1 suffix if present for video API
+    base = base_url.rstrip('/')
+    if base.endswith('/v1'):
+        base = base[:-3]
+    url = f"{base}/task/{task_id}"
+
+    req = urllib.request.Request(
+        url, method="GET",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Showmeai API error ({e.code}): {e.read().decode('utf-8', errors='replace')}") from e
+
+
 def process_response(response: dict, out_dir: Path, prompt: str, filename: str) -> None:
     """Process API response and save video if available."""
     # The API returns a task response; actual video may come later via async
@@ -171,7 +194,8 @@ def process_response(response: dict, out_dir: Path, prompt: str, filename: str) 
 
 def main():
     ap = argparse.ArgumentParser(description="Generate videos via Showmeai Seedance API.")
-    ap.add_argument("--prompt", required=True, help="Video generation prompt.")
+    ap.add_argument("--prompt", default="", help="Video generation prompt.")
+    ap.add_argument("--query", default="", help="Query task status by task ID.")
     ap.add_argument("--model", default="doubao-seedance-1-5-pro-251215",
                     help="Model name (default: doubao-seedance-1-5-pro-251215).")
     ap.add_argument("--image", default="", help="Reference image path or URL (image-to-video).")
@@ -192,6 +216,21 @@ def main():
         sys.exit(1)
     if not base_url:
         base_url = "https://api.showmeai.art/v1"
+
+    # Query mode
+    if args.query:
+        try:
+            response = query_task(base_url, api_key, args.query)
+            print(json.dumps(response, ensure_ascii=False, indent=2))
+            return
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    # Generate mode - validate prompt
+    if not args.prompt:
+        print("Error: --prompt is required for video generation.", file=sys.stderr)
+        sys.exit(1)
 
     # Validate frame arguments
     if (args.first_frame and not args.last_frame) or (args.last_frame and not args.first_frame):

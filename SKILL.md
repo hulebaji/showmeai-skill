@@ -7,7 +7,6 @@ metadata:
   {
     "openclaw":
       {
-        "emoji": "🎨",
         "requires": { "bins": ["python3"], "env": ["Showmeai_API_KEY", "Showmeai_BASE_URL"] },
         "primaryEnv": "Showmeai_API_KEY",
       },
