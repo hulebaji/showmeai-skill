@@ -1,9 +1,9 @@
 # 🎨 Showmeai
 
-Generate images with AI via Showmeai's OpenAI-compatible Images API.  
-通过 Showmeai 的 OpenAI 兼容图像 API，让你的 AI 助手学会画画。
+Generate **images and videos** with AI via Showmeai's API.
+通过 Showmeai API，让你的 AI 助手学会画图和生成视频。
 
-Supports **nano-banana** and **gpt-image** model series. Fast, flexible, works out of the box once configured.
+Image generation uses OpenAI-compatible Images API. Video generation uses Seedance (Doubao) API. Fast, flexible, works out of the box once configured.
 
 ---
 
@@ -60,7 +60,36 @@ Once configured, just tell your AI assistant what you want:
 
 ---
 
+## 🎬 Video Generation / 视频生成
+
+### Text-to-Video / 文生视频
+
+| English | 中文 |
+|---|---|
+| Generate a video of a detective entering a dim room | 生成一段侦探进入昏暗房间的视频 |
+| Create a video of a cat playing with a ball of yarn | 生成一段猫咪玩毛线球的视频 |
+| Make a 10 second video of a sunset timelapse | 制作一段 10 秒的日落延时视频 |
+
+### Image-to-Video / 图生视频
+
+| English | 中文 |
+|---|---|
+| Animate this image with the girl opening her eyes | 让这张图片里的女孩睁开眼睛动起来 |
+| Create a video from this photo, camera slowly pulling out | 用这张照片生成视频，镜头缓慢拉出 |
+
+### Video Parameters / 视频参数
+
+| English | 中文 |
+|---|---|
+| Generate a 16:9 widescreen video | 生成 16:9 宽屏视频 |
+| Create a 5 second video at 720p resolution | 生成 5 秒 720p 分辨率的视频 |
+| Generate video without audio to save cost | 生成无声视频以节省费用 |
+
+---
+
 ## 🤖 Supported Models / 支持的模型
+
+### Image Models / 图像模型
 
 | Model | Quality | Output |
 |---|---|---|
@@ -71,6 +100,12 @@ Once configured, just tell your AI assistant what you want:
 | `nano-banana-pro-4k` | Ultra 4K | URL |
 | `gpt-image-1` | High quality | Saved file |
 | `gpt-image-1.5` | Higher quality | Saved file |
+
+### Video Models / 视频模型
+
+| Model | Features |
+|---|---|
+| `doubao-seedance-1-5-pro-251215` ⭐ | **Default**. Text-to-video, image-to-video, first-and-last-frame. Supports audio generation, draft mode. 24 FPS, 5s/10s duration, 480P/720P resolution. |
 
 ---
 
