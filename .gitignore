@@ -1,0 +1,5 @@
+__pycache__/
+*.py[cod]
+_backups/
+showmeai-output/
+.DS_Store
