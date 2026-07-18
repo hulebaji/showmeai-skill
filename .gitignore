@@ -1,5 +1,43 @@
+# Python bytecode and tool caches
 __pycache__/
 *.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Local virtual environments
+.venv/
+venv/
+env/
+
+# Local credentials and machine-specific configuration
+.env
+.env.*
+!.env.example
+.secrets/
+/credentials
+/config.json
+*.pem
+*.key
+
+# Runtime artifacts and generated media
 _backups/
 showmeai-output/
+tasks/
+*.bak
+*.log
+
+# Editor and operating-system metadata
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
 .DS_Store
+Thumbs.db

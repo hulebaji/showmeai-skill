@@ -112,7 +112,7 @@ def model_definition(model_id: str) -> dict[str, Any] | None:
     return index_catalog().get(model_id)
 
 
-def validate_params(model_id: str, params: dict[str, Any]) -> dict[str, Any]:
+def validate_params(model_id: str, params: dict[str, Any], *, reject_unknown: bool = False) -> dict[str, Any]:
     definition = model_definition(model_id)
     if not definition:
         return params
@@ -121,6 +121,12 @@ def validate_params(model_id: str, params: dict[str, Any]) -> dict[str, Any]:
     for key, value in params.items():
         spec = specs.get(key)
         if spec is None:
+            if reject_unknown:
+                raise SkillError(
+                    "UNSUPPORTED_MODEL_PARAMETER",
+                    f"{key} is not supported by {model_id}.",
+                    details={"model": model_id, "parameter": key, "supported_parameters": sorted(specs)},
+                )
             continue
         if value is None or value == "":
             continue

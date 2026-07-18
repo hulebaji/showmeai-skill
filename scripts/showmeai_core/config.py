@@ -16,11 +16,18 @@ from .paths import config_file, credentials_file
 
 
 DEFAULT_BASE_URL = "https://api.showmeai.art/v1"
+ONBOARDING_CATEGORIES = ("image", "video", "3d", "tts", "music")
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "schema_version": 2,
+    "schema_version": 3,
     "api": {"base_url": DEFAULT_BASE_URL},
     "catalog": {"refresh_ttl_hours": 24, "available_models_hash": ""},
+    "onboarding": {
+        "version": 1,
+        "completed_categories": [],
+        "catalog_hash": "",
+        "completed_at": None,
+    },
     "defaults": {
         "image": {
             "model": "gemini-3.1-flash-image",
@@ -91,7 +98,7 @@ def save_config(config: dict[str, Any]) -> Path:
         backup = path.with_suffix(path.suffix + ".bak")
         shutil.copy2(path, backup)
     config = deepcopy(config)
-    config["schema_version"] = 2
+    config["schema_version"] = 3
     config["updated_at"] = datetime.now(timezone.utc).isoformat()
     _atomic_write(path, json.dumps(config, ensure_ascii=False, indent=2) + "\n")
     return path
@@ -145,6 +152,40 @@ def set_path(config: dict[str, Any], dotted_path: str, value: Any) -> None:
             raise SkillError("CONFIG_PATH_INVALID", f"{part} is not an object.")
         cursor = child
     cursor[parts[-1]] = value
+
+
+def onboarding_status(config: dict[str, Any], category: str = "") -> str:
+    """Return whether saved defaults have been explicitly confirmed."""
+    completed = set(config.get("onboarding", {}).get("completed_categories", []))
+    if category:
+        return "complete" if category in completed else "needs_defaults"
+    return "complete" if set(ONBOARDING_CATEGORIES).issubset(completed) else "needs_defaults"
+
+
+def complete_onboarding_category(config: dict[str, Any], category: str, catalog_hash: str) -> None:
+    """Persist an explicit default-model decision for one media category."""
+    if category not in ONBOARDING_CATEGORIES:
+        raise SkillError("ONBOARDING_CATEGORY_INVALID", f"Unsupported onboarding category: {category}")
+    onboarding = config.setdefault("onboarding", {})
+    completed = list(dict.fromkeys(onboarding.get("completed_categories", [])))
+    if category not in completed:
+        completed.append(category)
+    onboarding.update(
+        {
+            "version": 1,
+            "completed_categories": completed,
+            "catalog_hash": catalog_hash,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+
+
+def reset_onboarding_category(config: dict[str, Any], category: str) -> None:
+    """Require confirmation again after a default is edited or becomes unavailable."""
+    onboarding = config.setdefault("onboarding", {})
+    onboarding["completed_categories"] = [
+        item for item in onboarding.get("completed_categories", []) if item != category
+    ]
 
 
 def public_config(config: dict[str, Any]) -> dict[str, Any]:

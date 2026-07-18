@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.1.0] - 2026-07-18
+
+- Added runtime-enforced progressive onboarding with `needs_key`, `needs_defaults`, and category-complete states.
+- Added `onboarding status`, `onboarding models`, and validated `onboarding apply` commands for Agent-guided first-use setup.
+- Changed Agent-assisted Key setup so it cannot silently skip model and parameter confirmation.
+- Added blocking `ONBOARDING_REQUIRED` errors before creative intake or new generation.
+- Added model-specific strict parameter rejection and configurable image quantity defaults for Gemini image models.
+- Added `doctor --category` and `paths --json` for deterministic readiness checks and host-neutral path discovery.
+- Invalidated category onboarding when low-level defaults change or the selected model is unavailable to the current token group.
+- Strengthened the Agent contract to prohibit writing ShowMeAI settings into OpenClaw, WorkBuddy, Hermes, Codex, or other host configuration files.
+
 ## [2.0.0] - 2026-07-17
 
 - Added platform-neutral, OS-native configuration and task-state paths.

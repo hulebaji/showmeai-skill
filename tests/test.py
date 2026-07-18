@@ -20,7 +20,16 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from showmeai import build_parser, command_image, command_setup, main  # noqa: E402
+from showmeai import (  # noqa: E402
+    _require_category_ready,
+    build_parser,
+    command_config_set,
+    command_image,
+    command_onboarding,
+    command_paths,
+    command_setup,
+    main,
+)
 from showmeai_core.catalog import (  # noqa: E402
     grouped_models,
     infer_creative_category,
@@ -28,7 +37,14 @@ from showmeai_core.catalog import (  # noqa: E402
     recommended_image_model,
     validate_params,
 )
-from showmeai_core.config import DEFAULT_CONFIG, load_config, save_api_key, save_config  # noqa: E402
+from showmeai_core.config import (  # noqa: E402
+    DEFAULT_CONFIG,
+    complete_onboarding_category,
+    load_config,
+    onboarding_status,
+    save_api_key,
+    save_config,
+)
 from showmeai_core.errors import HttpError, SkillError, error_result  # noqa: E402
 from showmeai_core.http import ApiClient  # noqa: E402
 from showmeai_core.outputs import OutputManager  # noqa: E402
@@ -211,7 +227,9 @@ with tempfile.TemporaryDirectory() as temp:
 parser = build_parser()
 check(parser.parse_args(["image", "--prompt", "test"]).command == "image", "unified CLI routes image commands")
 check(video_legacy_args(["--prompt", "x", "--no-audio"]) == ["video", "--prompt", "x", "--no-audio"], "legacy video wrapper preserves no-audio intent")
-check(main(["config", "show", "--json"]) == 0, "--json is accepted after a subcommand")
+with tempfile.TemporaryDirectory() as temp:
+    with patch.dict(os.environ, {"SHOWMEAI_CONFIG_DIR": str(Path(temp) / "config")}, clear=False):
+        check(main(["config", "show", "--json"]) == 0, "--json is accepted after a subcommand")
 
 with tempfile.TemporaryDirectory() as temp:
     old_config_dir = os.environ.get("SHOWMEAI_CONFIG_DIR")
@@ -229,17 +247,72 @@ with tempfile.TemporaryDirectory() as temp:
             )()
         )
     check(setup_result["ok"] and setup_result["data"]["default_image_model"] == "nano-banana-2", "Agent-assisted setup validates stdin Key and applies image preference")
+    check(setup_result["data"]["models"]["image"][0]["id"] == "nano-banana-2", "Agent setup lists the recommended image model first")
+    check(setup_result["data"]["onboarding_status"] == "needs_defaults", "Key-only Agent setup cannot silently skip default-model confirmation")
+    expect_error(
+        "ONBOARDING_REQUIRED",
+        lambda: _require_category_ready(load_config(), "image"),
+        "new image generation is blocked before the user confirms a default model",
+    )
     check((Path(temp) / "config" / "credentials").read_text(encoding="utf-8").strip() == "agent-key-123456", "Agent-assisted setup persists the Key once")
+    with patch(
+        "showmeai.ApiClient.models",
+        return_value={"data": [{"id": "gpt-image-2"}, {"id": "nano-banana-2"}]},
+    ):
+        onboarding_result = command_onboarding(
+            type(
+                "OnboardingArgs",
+                (),
+                {
+                    "onboarding_command": "apply",
+                    "category": "image",
+                    "model": "nano-banana-2",
+                    "params_json": '{"n":2,"image_size":"2K","aspect_ratio":"4:3"}',
+                },
+            )()
+        )
+    check(onboarding_result["data"]["status"] == "complete", "Agent onboarding explicitly saves the chosen image model")
+    check(load_config()["defaults"]["image"]["params"]["n"] == 2, "onboarding saves model-supported default quantity")
+    check(onboarding_status(load_config(), "image") == "complete", "image onboarding completion persists across requests")
+    expect_error(
+        "UNSUPPORTED_MODEL_PARAMETER",
+        lambda: validate_params("gemini-3.1-flash-image", {"quality": "high"}, reject_unknown=True),
+        "onboarding rejects parameters unsupported by the selected model",
+    )
+    with patch(
+        "showmeai.ApiClient.models",
+        return_value={"data": [{"id": "nano-banana-2"}]},
+    ):
+        expect_error(
+            "MODEL_NOT_AVAILABLE_IN_GROUP",
+            lambda: command_onboarding(
+                type(
+                    "OnboardingArgs",
+                    (),
+                    {"onboarding_command": "apply", "category": "image", "model": "gpt-image-2", "params_json": "{}"},
+                )()
+            ),
+            "onboarding rejects a model unavailable to the current token group",
+        )
+    command_config_set(
+        type("ConfigArgs", (), {"path": "defaults.image.model", "value": "gpt-image-2"})()
+    )
+    check(onboarding_status(load_config(), "image") == "needs_defaults", "low-level default edits require onboarding confirmation again")
     if old_config_dir is None:
         os.environ.pop("SHOWMEAI_CONFIG_DIR", None)
     else:
         os.environ["SHOWMEAI_CONFIG_DIR"] = old_config_dir
+
+paths_result = command_paths(type("PathsArgs", (), {})())
+path_values = " ".join(str(value).lower() for value in paths_result["data"].values())
+check("openclaw" not in path_values and "workbuddy" not in path_values, "resolved ShowMeAI paths never target an Agent host config")
 
 with tempfile.TemporaryDirectory() as temp:
     old_config_dir = os.environ.get("SHOWMEAI_CONFIG_DIR")
     os.environ["SHOWMEAI_CONFIG_DIR"] = str(Path(temp) / "config")
     image_config = json.loads(json.dumps(DEFAULT_CONFIG))
     image_config["output"]["directory"] = str(Path(temp) / "output")
+    complete_onboarding_category(image_config, "image", "test-catalog")
     save_config(image_config)
     image_args = type(
         "ImageArgs",

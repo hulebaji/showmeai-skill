@@ -1,6 +1,6 @@
 # Design
 
-ShowMeAI Skill 2.0 separates Agent reasoning from a platform-neutral Python runtime.
+ShowMeAI Skill 2.1 separates Agent reasoning from a platform-neutral Python runtime.
 
 ## Goals and boundaries
 
@@ -36,6 +36,8 @@ scripts/showmeai.py
 ```
 
 The Agent owns ambiguous creative interpretation and explains choices. The scripts own deterministic validation, secret handling, request construction, state machines, retries, and file writes.
+
+First-use readiness is also runtime-owned. Key validation and category-default confirmation are separate states: `needs_key`, `needs_defaults`, and `complete`. Generation commands enforce category readiness, so an Agent cannot bypass onboarding by starting creative intake early. Categories are progressive and independent; completing image setup does not falsely mark video or audio defaults as reviewed.
 
 ## Security model
 
@@ -74,6 +76,14 @@ Do not treat submission as completion. Persist, poll with capped backoff, emit h
 ### D-005 · Multi-image count fulfillment
 
 Treat the requested image quantity as a runtime output contract independently of model-specific count support. Use a native count parameter when cataloged; otherwise, or when a successful upstream response is incomplete, submit bounded parallel one-image completion requests until the count is satisfied. Aggregate usage, report the physical request count, and return a structured error instead of silently returning an incomplete result.
+
+### D-006 · Runtime-enforced progressive onboarding
+
+Do not treat a validated Key as completed setup. Require an explicit model and supported-parameter decision once per requested media category, persist that state in schema version 3, and reject new generation with `ONBOARDING_REQUIRED` until it is complete. Agent-assisted standard-input setup returns choices but never silently confirms them.
+
+### D-007 · Host configuration isolation
+
+Expose resolved paths through `paths --json` and explicitly forbid Agents from storing ShowMeAI state in a host application's config or `.env` file. Editing defaults through the low-level `config set` command invalidates that category's onboarding confirmation until it is revalidated with `onboarding apply`.
 
 ## File structure
 

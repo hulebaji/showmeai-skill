@@ -4,7 +4,8 @@ description: >
   Generate and edit images, create videos, convert images to 3D, synthesize speech or music,
   and process images through ShowMeAI. Use when a user asks an Agent to create media,
   configure ShowMeAI models, inspect token-group availability, or resume a generation task.
-version: "2.0.0"
+  Before creative intake, the Agent must check category onboarding and complete it when required.
+version: "2.1.0"
 template: multi-scene
 author: ian
 homepage: https://api.showmeai.art
@@ -18,7 +19,11 @@ triggers:
   - configure ShowMeAI Key, models, or generation defaults
   - inspect token-group model availability
   - resume an unfinished generation task
-token_budget: 1800
+token_budget:
+  L0_trigger: 180
+  L1_core: 1800
+  L2_deep: 6000
+  hard_cap: 8000
 metadata:
   category: creative-media
   api: ShowMeAI
@@ -38,12 +43,21 @@ Use `python3 {baseDir}/scripts/showmeai.py`. Every command returns JSON; generat
 
 ## Instructions
 
-1. Before generation, run `doctor`. If it returns `SETUP_REQUIRED`, offer the one-time setup below. Never ask for a Key that is already configured.
-2. Accept a Key only through hidden interactive input or `setup --key-stdin`; never put it in arguments, config JSON, logs, or replies.
-3. Treat `models` as the current Key group's view. If a requested model is absent, tell the user to switch the API token group or enable automatic grouping, then refresh.
-4. Respect saved defaults unless the user overrides them. The initial image preference is `gemini-3.1-flash-image`; setup may choose another visible model.
-5. For video, 3D, music, and image-processing tasks, keep the command alive until terminal success or failure. Do not stop after a task ID. On interruption, preserve the journal and use `tasks resume`.
-6. Return downloaded local files, not only remote URLs or task IDs.
+The following order is mandatory. The readiness check is the first action for every new media request.
+
+1. Before asking for prompt, style, dimensions, quality, or count, run `doctor --category <requested-category>`. Never begin creative intake first.
+2. If it returns `SETUP_REQUIRED`, offer the one-time Key setup. Never ask for a Key that is already configured.
+3. If it returns `ONBOARDING_REQUIRED`, run `onboarding models --category <category> --json`, show the current token group's relevant models with the recommended option first, and ask the user to explicitly choose a model and supported defaults. Then persist the choice with `onboarding apply`. Do not generate until it succeeds.
+4. After category onboarding is complete, silently use the saved default unless the user requests an override. Do not ask for the model again on every generation.
+5. Accept a Key only through hidden interactive input or `setup --key-stdin`; never put it in arguments, config JSON, logs, or replies.
+6. Treat `models` as the current Key group's view. Different token groups can expose different models. If a requested model is absent, tell the user to switch the token group or enable automatic grouping, then refresh.
+7. The initial image recommendation is `gemini-3.1-flash-image`; the user's confirmed choice always wins.
+8. For video, 3D, music, and image-processing tasks, keep the command alive until terminal success or failure. Do not stop after a task ID. On interruption, preserve the journal and use `tasks resume`.
+9. Return downloaded local files, not only remote URLs or task IDs.
+
+## Configuration isolation
+
+Never create, read, or modify OpenClaw, WorkBuddy, Hermes, Codex, Claude, or another host application's config or `.env` file for ShowMeAI setup. Use only this bundled runtime. Run `paths --json` when the exact ShowMeAI-owned config, credential, and state locations are needed. Do not invent a host-specific path.
 
 ## One-time setup
 
@@ -59,13 +73,13 @@ When the user sends a Key to a trusted Agent, start this command and write the K
 python3 {baseDir}/scripts/showmeai.py setup --key-stdin --json
 ```
 
-The wizard validates the Key, fetches its group model list, filters creative categories, guides category defaults and model-specific parameters, and stores them in an OS-native directory. See [configuration.md](references/configuration.md).
+The Key step validates and stores the credential, then reports `needs_defaults`. In a local TTY, the wizard can immediately collect category choices. In Agent-assisted mode, continue with `onboarding models` and `onboarding apply`; `--key-stdin` must never silently complete model onboarding. See [configuration.md](references/configuration.md).
 
 ## Route requests
 
 | Intent | Command | Read when needed |
 |---|---|---|
-| Setup, diagnose, list/configure models | `setup`, `doctor`, `models`, `config` | [configuration.md](references/configuration.md) |
+| Setup, diagnose, list/configure models | `setup`, `doctor`, `onboarding`, `models`, `paths`, `config` | [configuration.md](references/configuration.md) |
 | Generate or edit an image | `image` | [image.md](references/image.md) |
 | Generate video | `video` | [video.md](references/video.md) |
 | Convert image to 3D | `3d` | [three-d.md](references/three-d.md) |
@@ -99,6 +113,8 @@ All media is downloaded below `output.directory` (default `./showmeai-output`) i
 ## Files
 
 See [README.md](README.md) for the annotated distribution tree covering entry points, shared modules, data, on-demand references, and tests.
+
+Distribution inventory: `SKILL.md`, `README.md`, `README.zh-CN.md`, `DESIGN.md`, `CHANGELOG.md`, `LICENSE`, `data/model-catalog.json`, `references/audio.md`, `references/configuration.md`, `references/image-tools.md`, `references/image.md`, `references/polling.md`, `references/three-d.md`, `references/video.md`, `scripts/gen.py`, `scripts/image_to_3d.py`, `scripts/showmeai.py`, `scripts/video_gen.py`, `scripts/showmeai_core/__init__.py`, `scripts/showmeai_core/catalog.py`, `scripts/showmeai_core/config.py`, `scripts/showmeai_core/errors.py`, `scripts/showmeai_core/http.py`, `scripts/showmeai_core/outputs.py`, `scripts/showmeai_core/paths.py`, `scripts/showmeai_core/tasks.py`, and `tests/test.py`.
 
 ## Further Reading
 

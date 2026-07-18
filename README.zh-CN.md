@@ -6,7 +6,7 @@
 
 这是一个不绑定 Agent 平台的 ShowMeAI 创意媒体 Skill，覆盖图片生成与编辑、视频、图片转 3D、语音、音乐、图片放大和抠图。它适合 Codex、Hermes、WorkBuddy、OpenClaw 及其他能运行 Python 的 Agent 用户；它不能替代 ShowMeAI 账号或 API Key。
 
-当前版本以 [SKILL.md](SKILL.md) 为准。本次升级加入一次性安装向导、当前令牌分组模型发现、模型专属默认参数、Key 安全持久化、结果自动下载和可恢复的持久轮询。
+当前版本以 [SKILL.md](SKILL.md) 为准。2.1.0 版加入运行时强制的渐进式首次引导：Key 验证和默认模型确认是两个独立步骤，请求类别完成配置前不能开始生成。
 
 ## 核心能力
 
@@ -17,6 +17,7 @@
 - 成功结果会下载到可预测的本地路径，并输出 `MEDIA:<绝对路径>`，不会只返回远程链接或任务 ID。
 - 1–10 张图片的数量要求会通过原生批量或有界并行补全实现，并汇总用量、报告实际请求次数。
 - 原有命令保留为兼容入口。
+- 首次配置由运行时强制检查，而不是只依赖 Agent 文案；类别配置完成后，后续请求直接使用已保存默认值，不会反复询问模型。
 
 ## 环境要求
 
@@ -29,7 +30,8 @@
 1. 把仓库复制或安装为 Agent Skill。
 2. 让 Agent 阅读 [SKILL.md](SKILL.md)。
 3. 首次运行 `python3 scripts/showmeai.py setup`。
-4. 直接用自然语言提出创意任务，或使用下方命令。
+4. 确认第一次使用的媒体类别的默认模型和支持参数。
+5. 直接用自然语言提出创意任务，或使用下方命令。
 
 ## 触发方式
 
@@ -52,13 +54,13 @@
 python3 scripts/showmeai.py setup
 ```
 
-向导会验证 Key，拉取该 Key 令牌分组能看到的模型，只列出创意媒体类别，并引导选择默认模型和参数。
+本地 TTY 向导会验证 Key、拉取该 Key 令牌分组能看到的模型，并引导选择默认模型和支持参数。Agent 辅助模式先验证 Key，然后必须把模型选择展示给用户并保存用户的明确决定，不会静默接受默认值。
 
 ### 可直接发给 Agent 的安装引导
 
 把下面这段话发给可信任的 Agent；等 Agent 已启动标准输入流程后再提供 Key：
 
-> 阅读这个 Skill 的 `SKILL.md`。运行 `python3 scripts/showmeai.py setup --key-stdin --json`，通过标准输入传入我的 ShowMeAI Key，不得回显，也不得把 Key 放进命令参数。等待验证完成后，只列出这个 Key 当前令牌分组可用的创意模型；协助我分别选择图片、视频、3D、语音、音乐的默认模型和模型专属参数。必须提醒我：不同令牌分组可调用的模型不同。完成后运行 `doctor`；配置成功后不要再次询问 Key。
+> 阅读这个 Skill 的 `SKILL.md`。在询问创作内容前，先执行 `doctor --category <请求类别> --json`。如果缺少 Key，执行 `setup --key-stdin --json`，通过标准输入传入我的 ShowMeAI Key，不得回显，也不得把 Key 放进命令参数。如果需要首次引导，执行 `onboarding models --category <请求类别> --json`，先展示推荐模型，再展示这个 Key 当前令牌分组可用的备选模型和支持参数，并让我选择；使用 `onboarding apply` 保存选择。必须提醒我不同令牌分组可调用的模型不同。首次引导成功前不得生成；类别配置完成后不得重复询问 Key 或模型，除非我要求修改。不得为 ShowMeAI 创建或修改 OpenClaw、WorkBuddy、Hermes、Codex 或其他宿主配置文件。
 
 如果 Agent 无法安全地向进程写入标准输入，请由用户亲自在终端运行交互式向导。不要把 Key 写进 shell 命令、URL、Git 文件或公开对话。
 
@@ -85,14 +87,21 @@ python3 scripts/showmeai.py doctor
 
 Key 单独保存在 `credentials`，支持权限控制的系统上会设置为仅当前用户可读写。非敏感偏好保存在 `config.json`。可用 `SHOWMEAI_CONFIG_DIR`、`SHOWMEAI_CONFIG_FILE`、`SHOWMEAI_STATE_DIR` 覆盖路径。`SHOWMEAI_API_KEY` 优先级最高；旧变量 `Showmeai_API_KEY` 只为迁移兼容。
 
+ShowMeAI 不需要任何 Agent 宿主配置目录。运行 `python3 scripts/showmeai.py paths --json` 可以查看实际使用的 ShowMeAI 专属路径。不要把 Key 写入 `.openclaw`、`.workbuddy`、`.hermes`、`.codex` 或宿主 `.env`。
+
 常用配置命令：
 
 ```bash
 python3 scripts/showmeai.py config show
+python3 scripts/showmeai.py onboarding status --category image
+python3 scripts/showmeai.py onboarding models --category image
+python3 scripts/showmeai.py onboarding apply --category image --model gemini-3.1-flash-image --params-json '{"n":1,"image_size":"1K","aspect_ratio":"1:1"}'
 python3 scripts/showmeai.py config set defaults.image.model gpt-image-2
 python3 scripts/showmeai.py config set defaults.image.params '{"n":1,"size":"auto","quality":"high","output_format":"png"}'
 python3 scripts/showmeai.py setup --replace-key
 ```
+
+`config set` 是底层兼容命令。通过它修改某个类别的默认值后，该类别会自动回到 `needs_defaults`；请使用 `onboarding apply` 验证并确认新模型和参数。
 
 ## 使用示例
 

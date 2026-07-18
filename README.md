@@ -6,7 +6,7 @@
 
 A platform-neutral Agent Skill for image generation/editing, video, image-to-3D, speech, music, upscaling, and background removal through the ShowMeAI API. It is intended for people using Codex, Hermes, WorkBuddy, OpenClaw, or another Python-capable Agent. It is not a replacement for a ShowMeAI account or API Key.
 
-The current version is declared in [SKILL.md](SKILL.md). This release adds a one-time setup wizard, current-token-group model discovery, model-specific defaults, secure Key persistence, automatic result download, and durable polling.
+The current version is declared in [SKILL.md](SKILL.md). Version 2.1.0 adds runtime-enforced progressive onboarding: Key validation and default-model confirmation are separate steps, and generation cannot start until the requested media category is ready.
 
 ## Core capabilities
 
@@ -17,6 +17,7 @@ The current version is declared in [SKILL.md](SKILL.md). This release adds a one
 - Every successful remote result is downloaded to a predictable local path and emitted as `MEDIA:<absolute-path>`.
 - Image counts from 1 to 10 are fulfilled through native batching or bounded parallel completion requests, with aggregate usage and physical request-count reporting.
 - Legacy commands remain available through thin wrappers.
+- First-use readiness is enforced by the runtime, not just Agent instructions. Once a category default is confirmed, later requests use it without repeatedly asking for a model.
 
 ## Requirements
 
@@ -29,7 +30,8 @@ The current version is declared in [SKILL.md](SKILL.md). This release adds a one
 1. Copy or install the repository as an Agent Skill.
 2. Ask the Agent to read [SKILL.md](SKILL.md).
 3. Run `python3 scripts/showmeai.py setup` once.
-4. Ask for a media task or use one of the commands below.
+4. Confirm the default model and supported parameters for the first media category you use.
+5. Ask for a media task or use one of the commands below.
 
 ## Trigger examples
 
@@ -52,13 +54,13 @@ Run the local wizard:
 python3 scripts/showmeai.py setup
 ```
 
-The wizard validates the Key, fetches the models visible to its token group, lists only creative media capabilities, and lets you choose models and default parameters.
+The local TTY wizard validates the Key, fetches models visible to its token group, and lets you choose models and supported parameters. Agent-assisted setup validates the Key first, then deliberately waits for the Agent to present model choices and save the user's explicit selection.
 
 ### Copy this setup guide to your Agent
 
 Send the following message to a trusted Agent, followed by the Key only when it is ready to write standard input:
 
-> Read this Skill's `SKILL.md`. Run `python3 scripts/showmeai.py setup --key-stdin --json`, pass my ShowMeAI Key through standard input without echoing or placing it in command arguments, and wait for validation. Show me the creative models available to this Key's token group. Help me choose defaults and model-specific parameters for image, video, 3D, speech, and music. Remind me that different token groups expose different models. Run `doctor` when finished. Do not ask for the Key again if configuration succeeds.
+> Read this Skill's `SKILL.md`. Before asking about my creative prompt, run `doctor --category <requested-category> --json`. If the Key is missing, run `setup --key-stdin --json`, pass my ShowMeAI Key through standard input without echoing it or placing it in command arguments, and wait for validation. If onboarding is required, run `onboarding models --category <requested-category> --json`, show me the recommended model first plus the alternatives and supported parameters available to this Key's token group, and ask me to choose. Save my choice with `onboarding apply`. Remind me that different token groups expose different models. Do not generate before onboarding succeeds, and do not ask for the Key or model again after the category is configured unless I request a change. Never create or edit an OpenClaw, WorkBuddy, Hermes, Codex, or other host config file for ShowMeAI.
 
 If the Agent cannot safely write to a process's standard input, run the interactive wizard yourself. Do not paste a Key into a shell command, URL, checked-in file, or public conversation.
 
@@ -85,14 +87,21 @@ A newly released creative ID can appear as `verified_uncataloged`: it is visible
 
 The Key is saved separately in `credentials` with owner-only permissions where supported. Non-secret preferences live in `config.json`. Override locations with `SHOWMEAI_CONFIG_DIR`, `SHOWMEAI_CONFIG_FILE`, and `SHOWMEAI_STATE_DIR`. `SHOWMEAI_API_KEY` remains the highest-priority Key source; legacy `Showmeai_API_KEY` is read for migration.
 
+ShowMeAI never needs a host application's configuration directory. Run `python3 scripts/showmeai.py paths --json` to inspect the exact ShowMeAI-owned paths. Do not store the Key in `.openclaw`, `.workbuddy`, `.hermes`, `.codex`, or a host `.env` file.
+
 Useful commands:
 
 ```bash
 python3 scripts/showmeai.py config show
+python3 scripts/showmeai.py onboarding status --category image
+python3 scripts/showmeai.py onboarding models --category image
+python3 scripts/showmeai.py onboarding apply --category image --model gemini-3.1-flash-image --params-json '{"n":1,"image_size":"1K","aspect_ratio":"1:1"}'
 python3 scripts/showmeai.py config set defaults.image.model gpt-image-2
 python3 scripts/showmeai.py config set defaults.image.params '{"n":1,"size":"auto","quality":"high","output_format":"png"}'
 python3 scripts/showmeai.py setup --replace-key
 ```
+
+`config set` is a low-level compatibility command. Editing a category default with it intentionally resets that category to `needs_defaults`; use `onboarding apply` to validate and confirm the new model and parameters.
 
 ## Generation examples
 

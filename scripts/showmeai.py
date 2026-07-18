@@ -23,9 +23,13 @@ from showmeai_core.catalog import (
 )
 from showmeai_core.config import (
     DEFAULT_BASE_URL,
+    ONBOARDING_CATEGORIES,
+    complete_onboarding_category,
     load_config,
+    onboarding_status,
     public_config,
     resolve_api_key,
+    reset_onboarding_category,
     save_api_key,
     save_config,
     set_path,
@@ -33,11 +37,11 @@ from showmeai_core.config import (
 from showmeai_core.errors import HttpError, SkillError, error_result
 from showmeai_core.http import ApiClient
 from showmeai_core.outputs import OutputManager
-from showmeai_core.paths import config_file, credentials_file
+from showmeai_core.paths import config_dir, config_file, credentials_file, state_dir
 from showmeai_core.tasks import TaskJournal, TaskRecord, TaskRunner, normalize_response
 
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 MAX_IMAGE_COUNT = 10
 DEFAULT_IMAGE_CONCURRENCY = 4
 GROUP_NOTICE = (
@@ -62,6 +66,10 @@ def _client(config: dict[str, Any], key: str | None = None) -> ApiClient:
     return ApiClient(base_url, api_key)
 
 
+def _ordered_candidates(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(models, key=lambda item: (item.get("recommended", 999), item.get("label", item["id"])))
+
+
 def _public_groups(groups: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
     result: dict[str, list[dict[str, Any]]] = {}
     for category, models in groups.items():
@@ -71,11 +79,48 @@ def _public_groups(groups: dict[str, list[dict[str, Any]]]) -> dict[str, list[di
                 "canonical_id": model["id"],
                 "label": model.get("label", model["id"]),
                 "availability": model["availability"],
+                "recommended": model.get("recommended") == 1,
+                "recommendation_rank": model.get("recommended"),
                 "params": model.get("params", {}),
             }
-            for model in models
+            for model in _ordered_candidates(models)
         ]
     return result
+
+
+def _onboarding_error(category: str) -> SkillError:
+    return SkillError(
+        "ONBOARDING_REQUIRED",
+        f"Choose and save a default {category} model before starting creative intake or generation.",
+        details={
+            "stage": "choose_default_model",
+            "category": category,
+            "blocking": True,
+            "must_complete_before_generation": True,
+            "models_command": f"python3 scripts/showmeai.py onboarding models --category {category} --json",
+            "apply_command": (
+                "python3 scripts/showmeai.py onboarding apply "
+                f"--category {category} --model <MODEL_ID> --params-json '<JSON>' --json"
+            ),
+            "agent_instruction": "Complete onboarding before asking for prompt, style, dimensions, quality, or count.",
+        },
+    )
+
+
+def _require_category_ready(config: dict[str, Any], category: str) -> None:
+    if onboarding_status(config, category) != "complete":
+        raise _onboarding_error(category)
+
+
+def _candidate_for_model(candidates: list[dict[str, Any]], model_id: str) -> dict[str, Any] | None:
+    requested = model_definition(model_id)
+    for candidate in candidates:
+        if candidate["selected_id"] == model_id:
+            return candidate
+        candidate_definition = model_definition(candidate["selected_id"])
+        if requested and candidate_definition and requested["id"] == candidate_definition["id"]:
+            return candidate
+    return None
 
 
 def _parse_value(text: str) -> Any:
@@ -100,15 +145,15 @@ def _prompt_value(name: str, spec: dict[str, Any], current: Any) -> Any:
     return entered
 
 
-def _select_default(config: dict[str, Any], groups: dict[str, list[dict[str, Any]]], category: str) -> None:
-    candidates = groups.get(category, [])
+def _select_default(config: dict[str, Any], groups: dict[str, list[dict[str, Any]]], category: str) -> bool:
+    candidates = _ordered_candidates(groups.get(category, []))
     if not candidates:
-        return
+        return False
     current = config["defaults"][category]["model"]
     default_index = next((index for index, item in enumerate(candidates, 1) if item["selected_id"] == current), 1)
     entered = input(f"\nDefault {category} model [number {default_index}, s to skip]: ").strip().lower()
     if entered == "s":
-        return
+        return False
     try:
         selected_index = int(entered) if entered else default_index
     except ValueError as error:
@@ -121,7 +166,7 @@ def _select_default(config: dict[str, Any], groups: dict[str, list[dict[str, Any
     specs = definition.get("params", {})
     basic_specs = {name: spec for name, spec in specs.items() if spec.get("basic")}
     if not basic_specs:
-        return
+        return True
     print(f"Configure common {category} defaults (press Enter to keep each value):")
     params: dict[str, Any] = {}
     existing = config["defaults"][category].get("params", {})
@@ -129,19 +174,26 @@ def _select_default(config: dict[str, Any], groups: dict[str, list[dict[str, Any
         current_value = existing.get(name, spec.get("default"))
         params[name] = _prompt_value(name, spec, current_value)
     config["defaults"][category]["params"] = validate_params(selected["selected_id"], params)
+    return True
 
 
-def _interactive_customize(config: dict[str, Any], groups: dict[str, list[dict[str, Any]]]) -> None:
+def _interactive_customize(config: dict[str, Any], groups: dict[str, list[dict[str, Any]]], catalog_hash: str) -> None:
     print("\nCreative models available to this token group:")
-    for category, items in groups.items():
+    for category, raw_items in groups.items():
+        items = _ordered_candidates(raw_items)
         if not items:
             continue
         print(f"\n[{category}]")
         for index, model in enumerate(items, 1):
-            print(f"  {index}. {model.get('label', model['id'])} ({model['selected_id']}) [{model['availability']}]")
+            recommendation = " RECOMMENDED" if model.get("recommended") == 1 else ""
+            print(
+                f"  {index}. {model.get('label', model['id'])} ({model['selected_id']}) "
+                f"[{model['availability']}]{recommendation}"
+            )
 
     for category in ("image", "video", "3d", "tts", "music"):
-        _select_default(config, groups, category)
+        if _select_default(config, groups, category):
+            complete_onboarding_category(config, category, catalog_hash)
 
     output = input(f"\nOutput directory [{config['output']['directory']}]: ").strip()
     if output:
@@ -175,13 +227,18 @@ def command_setup(args: argparse.Namespace) -> dict[str, Any]:
 
     groups = grouped_models(live_ids)
     config["api"]["base_url"] = base_url
-    config["catalog"]["available_models_hash"] = available_hash(live_ids)
+    live_hash = available_hash(live_ids)
+    config["catalog"]["available_models_hash"] = live_hash
     current_image_model = config["defaults"]["image"].get("model", "")
     if current_image_model not in live_ids:
         config["defaults"]["image"]["model"] = recommended_image_model(live_ids)
+    for category in ONBOARDING_CATEGORIES:
+        selected = config["defaults"][category].get("model", "")
+        if _candidate_for_model(groups.get(category, []), selected) is None:
+            reset_onboarding_category(config, category)
     if sys.stdin.isatty() and not args.key_stdin and not args.non_interactive:
         print(f"\nWARNING: {GROUP_NOTICE}")
-        _interactive_customize(config, groups)
+        _interactive_customize(config, groups, live_hash)
 
     if key_is_new:
         save_api_key(api_key)
@@ -194,14 +251,20 @@ def command_setup(args: argparse.Namespace) -> dict[str, Any]:
             "credential_source": "credentials_file" if key_is_new else existing_source,
             "credential_fingerprint": f"***{api_key[-4:]}",
             "default_image_model": config["defaults"]["image"]["model"],
+            "onboarding_status": onboarding_status(config),
+            "completed_categories": config["onboarding"]["completed_categories"],
             "models": _public_groups(groups),
             "group_notice": GROUP_NOTICE,
-            "next_action": "Choose or update defaults with `config set` or rerun interactive `setup`.",
+            "next_action": (
+                "Use `onboarding apply` to confirm a category model and its supported defaults before generation."
+                if onboarding_status(config) != "complete"
+                else "Run `doctor` and start generating."
+            ),
         },
     }
 
 
-def command_doctor(_args: argparse.Namespace) -> dict[str, Any]:
+def command_doctor(args: argparse.Namespace) -> dict[str, Any]:
     config = load_config()
     api_key, source = resolve_api_key()
     live_ids = normalize_live_models(_client(config, api_key).models())
@@ -216,6 +279,9 @@ def command_doctor(_args: argparse.Namespace) -> dict[str, Any]:
         )
         for live_id in live_ids
     )
+    category = getattr(args, "category", "")
+    if category and onboarding_status(config, category) != "complete":
+        raise _onboarding_error(category)
     return {
         "ok": True,
         "data": {
@@ -227,7 +293,87 @@ def command_doctor(_args: argparse.Namespace) -> dict[str, Any]:
             "available_model_count": len(live_ids),
             "default_image_model": selected,
             "default_image_model_available": selected_available,
+            "onboarding_status": onboarding_status(config, category),
+            "completed_categories": config["onboarding"]["completed_categories"],
             "group_notice": GROUP_NOTICE,
+        },
+    }
+
+
+def command_onboarding(args: argparse.Namespace) -> dict[str, Any]:
+    config = load_config()
+    api_key, source = resolve_api_key(required=False)
+    if args.onboarding_command == "status":
+        status = "needs_key" if not api_key else onboarding_status(config, args.category)
+        return {
+            "ok": True,
+            "data": {
+                "status": status,
+                "category": args.category or None,
+                "completed_categories": config["onboarding"]["completed_categories"],
+                "credential_source": source,
+                "next_action": "run_setup" if status == "needs_key" else ("choose_defaults" if status != "complete" else "generate"),
+            },
+        }
+
+    if not api_key:
+        resolve_api_key()
+    live_ids = normalize_live_models(_client(config, api_key).models())
+    groups = grouped_models(live_ids)
+    candidates = groups.get(args.category, [])
+    if args.onboarding_command == "models":
+        return {
+            "ok": True,
+            "data": {
+                "category": args.category,
+                "status": onboarding_status(config, args.category),
+                "models": _public_groups({args.category: candidates})[args.category],
+                "group_notice": GROUP_NOTICE,
+                "next_action": "Ask the user to explicitly choose a model and supported defaults, then run `onboarding apply`.",
+            },
+        }
+
+    candidate = _candidate_for_model(candidates, args.model)
+    if candidate is None:
+        raise SkillError(
+            "MODEL_NOT_AVAILABLE_IN_GROUP",
+            f"{args.model} is not available for {args.category} with the current API key group.",
+            details={"category": args.category, "group_notice": GROUP_NOTICE},
+        )
+    try:
+        params = json.loads(args.params_json)
+    except json.JSONDecodeError as error:
+        raise SkillError("SETUP_INPUT_INVALID", "--params-json must be a JSON object.") from error
+    if not isinstance(params, dict):
+        raise SkillError("SETUP_INPUT_INVALID", "--params-json must be a JSON object.")
+    selected_id = candidate["selected_id"]
+    if candidate.get("availability") == "verified_uncataloged" and params:
+        raise SkillError(
+            "MODEL_PARAMETERS_UNCATALOGED",
+            f"{selected_id} is visible, but its parameter schema is not cataloged. Confirm it with empty defaults.",
+            details={"model": selected_id, "supported_parameters": []},
+        )
+    validated = validate_params(selected_id, params, reject_unknown=True)
+    config["defaults"][args.category] = {"model": selected_id, "params": validated}
+    if args.category == "image":
+        config["defaults"][args.category]["fallback_candidates"] = [
+            item for item in ("gpt-image-2", "gemini-3-pro-image", "nano-banana-pro") if item != selected_id
+        ]
+        config["defaults"][args.category]["fallback_on"] = ["model_unavailable", "capacity_unavailable"]
+    live_hash = available_hash(live_ids)
+    config["catalog"]["available_models_hash"] = live_hash
+    complete_onboarding_category(config, args.category, live_hash)
+    path = save_config(config)
+    return {
+        "ok": True,
+        "data": {
+            "status": "complete",
+            "category": args.category,
+            "model": selected_id,
+            "params": validated,
+            "config_file": str(path),
+            "completed_categories": config["onboarding"]["completed_categories"],
+            "next_action": "Use the saved default without asking for the model again unless the user requests an override.",
         },
     }
 
@@ -255,11 +401,27 @@ def command_config_set(args: argparse.Namespace) -> dict[str, Any]:
     value = _parse_value(args.value)
     cataloged = not (args.path.endswith(".model") and isinstance(value, str)) or model_definition(value) is not None
     set_path(config, args.path, value)
+    parts = args.path.split(".")
+    if len(parts) >= 3 and parts[0] == "defaults" and parts[1] in ONBOARDING_CATEGORIES:
+        reset_onboarding_category(config, parts[1])
     path = save_config(config)
     data: dict[str, Any] = {"config_file": str(path), "path": args.path, "value": value}
     if not cataloged:
         data["warning"] = "This live model is not in the local parameter catalog; its model-specific defaults cannot be validated yet."
     return {"ok": True, "data": data}
+
+
+def command_paths(_args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "data": {
+            "config_directory": str(config_dir()),
+            "config_file": str(config_file()),
+            "credentials_file": str(credentials_file()),
+            "state_directory": str(state_dir()),
+            "policy": "ShowMeAI-owned OS-native paths only; never write to an Agent host configuration directory.",
+        },
+    }
 
 
 def _image_params(config: dict[str, Any], args: argparse.Namespace, model: str) -> dict[str, Any]:
@@ -389,6 +551,7 @@ def _complete_image_count(
 def command_image(args: argparse.Namespace) -> dict[str, Any]:
     config = load_config()
     client = _client(config)
+    _require_category_ready(config, "image")
     model = args.model or config["defaults"]["image"]["model"]
     params = _image_params(config, args, model)
     requested_count = args.count if args.count is not None else int(params.get("n", 1))
@@ -493,6 +656,7 @@ def command_video(args: argparse.Namespace) -> dict[str, Any]:
     if args.query:
         record = TaskRecord(args.query, "video", client.task_url(f"task/{args.query}"), "video", args.query)
         return _wait_task(config, client, record, args.out_dir, args.max_wait)
+    _require_category_ready(config, "video")
     if not args.prompt:
         raise SkillError("PROMPT_REQUIRED", "Video generation requires --prompt.")
     if bool(args.first_frame) != bool(args.last_frame):
@@ -548,6 +712,7 @@ def command_3d(args: argparse.Namespace) -> dict[str, Any]:
     if args.query:
         record = TaskRecord(args.query, "3d", client.task_url(f"task/{args.query}"), "3d", args.query)
         return _wait_task(config, client, record, args.out_dir, args.max_wait)
+    _require_category_ready(config, "3d")
     image_path = Path(args.image).expanduser()
     if not image_path.is_file():
         raise SkillError("INPUT_NOT_FOUND", f"Input image not found: {args.image}")
@@ -580,6 +745,7 @@ def command_3d(args: argparse.Namespace) -> dict[str, Any]:
 def command_tts(args: argparse.Namespace) -> dict[str, Any]:
     config = load_config()
     client = _client(config)
+    _require_category_ready(config, "tts")
     model = args.model or config["defaults"]["tts"]["model"]
     defaults = config["defaults"]["tts"].get("params", {}) if model == config["defaults"]["tts"]["model"] else {}
     response_format = args.response_format or defaults.get("response_format", "mp3")
@@ -610,6 +776,7 @@ def command_tts(args: argparse.Namespace) -> dict[str, Any]:
 def command_music(args: argparse.Namespace) -> dict[str, Any]:
     config = load_config()
     client = _client(config)
+    _require_category_ready(config, "music")
     model = args.model or config["defaults"]["music"]["model"]
     defaults = config["defaults"]["music"].get("params", {}) if model == config["defaults"]["music"]["model"] else {}
     mode = args.mode or defaults.get("mode", "inspiration")
@@ -687,9 +854,26 @@ def build_parser() -> argparse.ArgumentParser:
     setup.set_defaults(func=command_setup)
 
     doctor = commands.add_parser("doctor", help="Validate configuration, authentication, and model availability.")
+    doctor.add_argument("--category", choices=ONBOARDING_CATEGORIES, default="")
     doctor.set_defaults(func=command_doctor)
     models = commands.add_parser("models", help="List creative models visible to the current token group.")
     models.set_defaults(func=command_models)
+    paths = commands.add_parser("paths", help="Show the exact ShowMeAI-owned configuration and state paths.")
+    paths.set_defaults(func=command_paths)
+
+    onboarding = commands.add_parser("onboarding", help="Inspect or complete first-use model defaults.")
+    onboarding_commands = onboarding.add_subparsers(dest="onboarding_command", required=True)
+    onboarding_status_parser = onboarding_commands.add_parser("status")
+    onboarding_status_parser.add_argument("--category", choices=ONBOARDING_CATEGORIES, default="")
+    onboarding_status_parser.set_defaults(func=command_onboarding)
+    onboarding_models = onboarding_commands.add_parser("models")
+    onboarding_models.add_argument("--category", choices=ONBOARDING_CATEGORIES, required=True)
+    onboarding_models.set_defaults(func=command_onboarding)
+    onboarding_apply = onboarding_commands.add_parser("apply")
+    onboarding_apply.add_argument("--category", choices=ONBOARDING_CATEGORIES, required=True)
+    onboarding_apply.add_argument("--model", required=True)
+    onboarding_apply.add_argument("--params-json", default="{}")
+    onboarding_apply.set_defaults(func=command_onboarding)
 
     config = commands.add_parser("config", help="Show or edit non-secret preferences.")
     config_commands = config.add_subparsers(dest="config_command", required=True)
